@@ -4,6 +4,7 @@ import { ChevronRight, Check } from 'lucide-react';
 const MultiStepForm = () => {
   const [currentStep, setCurrentStep] = useState(1);
   const [showConfirmation, setShowConfirmation] = useState(false);
+  const [isProcessing, setIsProcessing] = useState(false);
   const [formData, setFormData] = useState({
     // Step 1 - Personal Info
     name: '',
@@ -155,11 +156,79 @@ const MultiStepForm = () => {
     setCurrentStep(prev => Math.max(prev - 1, 1));
   };
 
-  const handleSubmit = () => {
-    console.log('Form submitted:', formData);
-    setShowConfirmation(true);
+  const calculateTotal = () => {
+    const selectedPlan = plans.find(plan => plan.id === formData.selectedPlan);
+    const selectedAddOns = addOns.filter(addOn => formData[addOn.id]);
+    
+    const planPrice = selectedPlan 
+      ? (formData.billingCycle === 'monthly' ? selectedPlan.monthlyPrice : selectedPlan.yearlyPrice)
+      : 0;
+    
+    const addOnsPrice = selectedAddOns.reduce((total, addOn) => {
+      return total + (formData.billingCycle === 'monthly' ? addOn.monthlyPrice : addOn.yearlyPrice);
+    }, 0);
+    
+    return planPrice + addOnsPrice;
   };
 
+const handleSubmit = async () => {
+  
+  if (!window.Razorpay) {
+    alert("Razorpay SDK failed to load. Please check your internet connection.");
+    return;
+  }
+console.log("Vite Key Check:", import.meta.env.VITE_RAZORPAY_KEY_ID);
+  const total = calculateTotal();
+  setIsProcessing(true); 
+
+  try {
+    
+    const response = await fetch("http://localhost:5000/create-order", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ amount: total }),
+    });
+    
+    if (!response.ok) throw new Error("Backend server error");
+    
+    const order = await response.json();
+
+    
+    const options = {
+      key: import.meta.env.VITE_RAZORPAY_KEY_ID,
+      amount: order.amount,
+      currency: "INR",
+      description: `${formData.selectedPlan.toUpperCase()} Plan Subscription`,
+      order_id: order.id, 
+      handler: function (paymentResponse) {
+        
+        console.log("Payment Successful ID:", paymentResponse.razorpay_payment_id);
+        
+        setIsProcessing(false);
+        setShowConfirmation(true); 
+      },
+      prefill: {
+        name: formData.name,
+        email: formData.email,
+        contact: formData.phone,
+      },
+      theme: { color: "#483eff" }, 
+      modal: {
+        ondismiss: function() {
+          setIsProcessing(false); 
+        }
+      }
+    };
+
+    const rzp = new window.Razorpay(options);
+    rzp.open();
+
+  } catch (err) {
+    console.error("Payment initialization failed:", err);
+    alert("Could not connect to payment server. Is your Node.js app running?");
+    setIsProcessing(false);
+  }
+};
   const closeConfirmation = () => {
     setShowConfirmation(false);
     
@@ -433,7 +502,7 @@ const MultiStepForm = () => {
     }
   };
 
-  // Simple confirmation popup
+  
   const renderConfirmationPopup = () => (
     <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
       <div className="bg-white rounded-lg p-8 max-w-md mx-4 text-center">
@@ -496,7 +565,6 @@ const MultiStepForm = () => {
         </div>
       </div>
 
-      {/* Simple confirmation popup */}
       {showConfirmation && renderConfirmationPopup()}
     </div>
   );
